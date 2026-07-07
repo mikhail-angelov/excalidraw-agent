@@ -76,6 +76,10 @@ app.use((req, res, next) => {
 // API
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
+app.get('/api/scene', (req, res) => {
+  res.json({ elements: [...getSessionElements(sessionId(req)).values()] })
+})
+
 app.post('/api/clear', (req, res) => {
   res.json({ cleared: clearSession(sessionId(req)) })
 })
