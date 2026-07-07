@@ -3,11 +3,24 @@
 export const sessions = new Map<string, Map<string, any>>()
 export const wsBySession = new Map<string, Set<any>>()
 
+// Session TTL tracking
+const sessionLastAccess = new Map<string, number>()
+const SESSION_TTL = 1800_000 // 30 minutes
+
+function touchSession(sid: string) {
+  sessionLastAccess.set(sid, Date.now())
+}
+
+function getOrCreateSession(sid: string): Map<string, any> {
+  touchSession(sid)
+  if (!sessions.has(sid)) sessions.set(sid, new Map())
+  return sessions.get(sid)!
+}
+
 // --- Session helpers ---
 
 export function getSessionElements(sid: string): Map<string, any> {
-  if (!sessions.has(sid)) sessions.set(sid, new Map())
-  return sessions.get(sid)!
+  return getOrCreateSession(sid)
 }
 
 export function broadcast(sid: string, msg: any) {
@@ -48,6 +61,10 @@ export function updateElement(sid: string, id: string, data: any): any | null {
   if (el.locked) return null
   const updated = { ...el, ...data, id }
   els.set(id, updated)
+  // Reroute bound arrows when shape position/size changes
+  if (data.x !== undefined || data.y !== undefined || data.width !== undefined || data.height !== undefined) {
+    rerouteBoundArrows(sid, id)
+  }
   return updated
 }
 
@@ -357,3 +374,23 @@ export function rerouteBoundArrows(sid: string, movedId: string): any[] {
   }
   return updated
 }
+
+// --- Session cleanup ---
+
+const CLEANUP_INTERVAL = 300_000 // 5 minutes
+
+function cleanupStaleSessions() {
+  const now = Date.now()
+  for (const [sid, lastAccess] of sessionLastAccess) {
+    if (now - lastAccess > SESSION_TTL) {
+      sessions.delete(sid)
+      wsBySession.delete(sid)
+      sessionLastAccess.delete(sid)
+      snapshots.delete(sid)
+      console.log(`Session ${sid} cleaned up (TTL expired)`)
+    }
+  }
+}
+
+setInterval(cleanupStaleSessions, CLEANUP_INTERVAL)
+

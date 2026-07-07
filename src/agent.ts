@@ -3,6 +3,7 @@ import { runTool, TOOLS } from './tools.js'
 const LLM_URL = process.env.LLM_URL || 'https://api.openai.com/v1/chat/completions'
 const LLM_KEY = process.env.LLM_KEY || process.env.OPENAI_API_KEY || ''
 const LLM_MODEL = process.env.LLM_MODEL || 'gpt-4o'
+const LLM_TIMEOUT = parseInt(process.env.LLM_TIMEOUT || '60000', 10)
 
 export async function agent(prompt: string, sessionId = 'default'): Promise<{ turns: number; log: string[] }> {
   const log: string[] = []
@@ -17,37 +18,73 @@ Call done when the diagram is finished. Be creative and have fun.` },
   ]
 
   for (turn = 0; turn < 15; turn++) {
-    const response = await fetch(LLM_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LLM_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        messages,
-        tools: TOOLS.map(t => ({
-          type: 'function' as const,
-          function: { name: t.name, description: t.description, parameters: t.parameters }
-        })),
-        tool_choice: 'auto' as const
+    // HTTP call with timeout
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT)
+    let response: Response
+    try {
+      response = await fetch(LLM_URL, {
+        signal: controller.signal,
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LLM_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages,
+          tools: TOOLS.map(t => ({
+            type: 'function' as const,
+            function: { name: t.name, description: t.description, parameters: t.parameters }
+          })),
+          tool_choice: 'auto' as const
+        })
       })
-    })
+    } finally {
+      clearTimeout(timeout)
+    }
 
-    const llmResponse = await response.json()
-    if (llmResponse.error) {
-      log.push(`LLM Error: ${llmResponse.error.message || JSON.stringify(llmResponse.error)}`)
+    // Check HTTP status
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      log.push(`⚠️ LLM HTTP ${response.status}: ${text.slice(0, 500)}`)
       return { turns: turn, log }
     }
 
-    const msg = llmResponse.choices[0].message
-    messages.push(msg)
+    // Safe JSON parse
+    let llmResponse: any
+    try {
+      llmResponse = await response.json()
+    } catch {
+      const text = await response.text().catch(() => '').then(t => t.slice(0, 200))
+      log.push(`⚠️ LLM returned non-JSON response: ${text}`)
+      return { turns: turn, log }
+    }
 
+    if (llmResponse.error) {
+      log.push(`⚠️ LLM Error: ${llmResponse.error.message || JSON.stringify(llmResponse.error)}`)
+      return { turns: turn, log }
+    }
+
+    const msg = llmResponse.choices?.[0]?.message
+    if (!msg) {
+      log.push(`⚠️ Unexpected LLM response format`)
+      return { turns: turn, log }
+    }
+
+    messages.push(msg)
     if (msg.content) log.push(`🤖 ${msg.content}`)
     if (isDone(msg)) return { turns: turn, log }
 
     for (const tc of (msg.tool_calls || [])) {
-      const args = JSON.parse(tc.function.arguments)
+      // Safe JSON parse for tool args
+      let args: any = {}
+      try {
+        args = JSON.parse(tc.function.arguments || '{}')
+      } catch {
+        log.push(`⚠️ Invalid JSON args for ${tc.function.name}`)
+        continue
+      }
       log.push(`  🛠 ${tc.function.name}(${JSON.stringify(args)})`)
       const result = await runTool(tc.function.name, args, sessionId)
       messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) })
