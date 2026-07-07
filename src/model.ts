@@ -83,7 +83,7 @@ export function batchAddElements(sid: string, elements: any[]): any[] {
   const els = getSessionElements(sid)
   // Two-pass: 1) create all elements, 2) resolve arrows with full map
   const created = elements.map((el: any) => {
-    const full = { id: crypto.randomUUID(), ...el }
+    const full = { ...el, id: el.id || crypto.randomUUID() }
     els.set(full.id, full)
     return full
   })
