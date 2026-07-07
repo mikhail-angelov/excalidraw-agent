@@ -33,64 +33,46 @@ test.beforeAll(async () => {
 test.beforeEach(() => model.clearSession(SID))
 test.afterAll(() => { server?.close(); wss?.close() })
 
-test('WebSocket receives element_created broadcast', async () => {
+test('WebSocket receives initial_elements on connect', async () => {
   const { default: WebSocket } = await import('ws') as any
   const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
-  const messages: any[] = []
-  ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
-  await new Promise<void>(r => ws.on('open', r))
-  while (messages.length < 1 || messages[0].type !== 'initial_elements') await new Promise(r => setTimeout(r, 50))
-
-  model.addElement(SID, { type: 'rectangle', x: 100, y: 100, width: 200, height: 80, text: 'CEO' })
-  while (!messages.find((m: any) => m.type === 'element_created'))
-    await new Promise(r => setTimeout(r, 50))
-  expect(messages.find((m: any) => m.type === 'element_created').element.text).toBe('CEO')
+  const msg = await new Promise<any>((resolve) => {
+    ws.on('message', (data: Buffer) => resolve(JSON.parse(data.toString())))
+  })
+  expect(msg.type).toBe('initial_elements')
+  expect(msg.elements).toEqual([])
   ws.close()
 })
 
-test('WebSocket receives batch_created and element_updated', async () => {
+test('WebSocket receives canvas_cleared', async () => {
   const { default: WebSocket } = await import('ws') as any
   const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
-  const messages: any[] = []
-  ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
   await new Promise<void>(r => ws.on('open', r))
-  while (messages.length < 1 || messages[0].type !== 'initial_elements') await new Promise(r => setTimeout(r, 50))
 
-  model.batchAddElements(SID, [
-    { id: 'a', type: 'rectangle', x: 50, y: 50, width: 120, height: 60, text: 'A' },
-    { id: 'b', type: 'rectangle', x: 250, y: 50, width: 120, height: 60, text: 'B' },
-  ])
-  while (!messages.find((m: any) => m.type === 'batch_created'))
-    await new Promise(r => setTimeout(r, 50))
-  expect(messages.find((m: any) => m.type === 'batch_created').elements.length).toBe(2)
-
-  model.updateElement(SID, 'a', { text: 'Updated A' })
-  while (!messages.find((m: any) => m.type === 'element_updated'))
-    await new Promise(r => setTimeout(r, 50))
-  expect(messages.find((m: any) => m.type === 'element_updated').element.text).toBe('Updated A')
+  // Clear the session — broadcasts canvas_cleared
+  model.clearSession(SID)
+  const msg = await new Promise<any>((resolve) => {
+    ws.on('message', (data: Buffer) => {
+      const parsed = JSON.parse(data.toString())
+      if (parsed.type === 'canvas_cleared') resolve(parsed)
+    })
+  })
+  expect(msg.type).toBe('canvas_cleared')
   ws.close()
 })
 
-test('WebSocket receives delete and clear events', async () => {
-  const { default: WebSocket } = await import('ws') as any
-  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
-  const messages: any[] = []
-  ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
-  await new Promise<void>(r => ws.on('open', r))
-  while (messages.length < 1 || messages[0].type !== 'initial_elements') await new Promise(r => setTimeout(r, 50))
+test('model operations work without WS broadcasts', async () => {
+  // Elements are stored in model; UI loads them via initial_elements on WS connect
+  const el = model.addElement(SID, { type: 'rectangle', x: 100, y: 100, width: 200, height: 80, text: 'CEO' })
+  expect(el.type).toBe('rectangle')
+  expect(el.text).toBe('CEO')
 
-  const el = model.addElement(SID, { type: 'rectangle', x: 10, y: 10 })
-  while (!messages.find((m: any) => m.type === 'element_created'))
-    await new Promise(r => setTimeout(r, 50))
+  const got = model.getElement(SID, el.id)
+  expect(got.id).toBe(el.id)
+
+  model.updateElement(SID, el.id, { text: 'Updated' })
+  expect(model.getElement(SID, el.id).text).toBe('Updated')
 
   model.removeElement(SID, el.id)
-  while (!messages.find((m: any) => m.type === 'element_deleted'))
-    await new Promise(r => setTimeout(r, 50))
-  expect(messages.find((m: any) => m.type === 'element_deleted').id).toBe(el.id)
-
-  model.clearSession(SID)
-  while (!messages.find((m: any) => m.type === 'canvas_cleared'))
-    await new Promise(r => setTimeout(r, 50))
-  expect(messages.find((m: any) => m.type === 'canvas_cleared')).toBeTruthy()
-  ws.close()
+  expect(model.getElement(SID, el.id)).toBeNull()
 })

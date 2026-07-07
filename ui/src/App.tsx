@@ -167,28 +167,6 @@ const validateAndFixBindings = (
   });
 };
 
-// Extract text from shapes — create separate text elements for Excalidraw
-const extractTextElements = (elements: any[]): any[] => {
-  const result: any[] = [];
-  for (const el of elements) {
-    result.push(el);
-    if (el.text && el.type !== 'text') {
-      const textEl: any = {
-        id: `${el.id}-text`, type: 'text',
-        x: el.x + (el.width || 100) / 2 - 30, y: el.y + 10,
-        width: 60, height: 20,
-        text: el.text, fontSize: el.fontSize || 16,
-        containerId: el.id,
-      };
-      if (!el.boundElements) el.boundElements = [];
-      if (!el.boundElements.some((b: any) => b.id === textEl.id))
-        el.boundElements.push({ id: textEl.id, type: 'text' });
-      result.push(textEl);
-    }
-  }
-  return result;
-};
-
 function App(): JSX.Element {
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawAPIRefValue | null>(null);
@@ -275,8 +253,7 @@ function App(): JSX.Element {
 
       if (result.success && result.elements && result.elements.length > 0) {
         const cleanedElements = result.elements.map(cleanElementForExcalidraw);
-        const extractedElements = extractTextElements(cleanedElements);
-        const convertedElements = convertToExcalidrawElements(extractedElements, {
+        const convertedElements = convertToExcalidrawElements(cleanedElements, {
           regenerateIds: false,
         });
         excalidrawAPI?.updateScene({ elements: convertedElements });
@@ -938,8 +915,6 @@ function App(): JSX.Element {
                 id: (Date.now() + 1).toString(),
                 type: "assistant",
                 content: result.response,
-                tools: result.tools || [],
-                thoughts: result.thoughts || [],
                 timestamp: new Date(),
               },
             ];
@@ -949,9 +924,6 @@ function App(): JSX.Element {
         setCurrentStreamingMessageId(null);
         setAiStatus("idle");
         await syncToBackend();
-        // Clear canvas and reload all elements (batch render after model build)
-        excalidrawAPI?.updateScene({ elements: [], captureUpdate: CaptureUpdateAction.NEVER })
-        loadExistingElements();
       } else {
         throw new Error(result.error || "Unknown error from chat API");
       }
@@ -1126,38 +1098,18 @@ function App(): JSX.Element {
                 <div className="ai-message-header">
                   <span className="ai-message-sender">
                     {message.type === "user"
-                      ? "🧑 You"
+                      ? "You"
                       : message.type === "assistant"
-                        ? "🤖 Agent"
+                        ? "AI Assistant"
                         : message.type === "step"
-                          ? "⚙️ Progress"
-                          : "💬 System"}
+                          ? "Progress"
+                          : "System"}
                   </span>
                   <span className="ai-message-time">
                     {formatMessageTime(message.timestamp)}
                   </span>
                 </div>
-                {message.type === "assistant" && message.tools?.length > 0 ? (
-                  <div className="ai-message-content">
-                    {message.thoughts?.slice(0, 1).map((t: string, i: number) => (
-                      <div key={i} style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>{t}</div>
-                    ))}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
-                      {message.tools.map((t: any, i: number) => (
-                        <span key={i} style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 3,
-                          padding: '2px 8px', borderRadius: 4, fontSize: 11,
-                          background: '#f0f0f0', color: '#555',
-                        }}>
-                          🛠 {t.name}
-                        </span>
-                      ))}
-                    </div>
-                    <div style={{ fontSize: 13, color: '#2f9e44', fontWeight: 600 }}>✅ Done</div>
-                  </div>
-                ) : (
-                  <div className="ai-message-content">{message.content}</div>
-                )}
+                <div className="ai-message-content">{message.content}</div>
               </div>
             ))}
             {aiStatus === "thinking" && (

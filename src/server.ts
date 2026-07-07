@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { agent } from './agent.js'
-import { wsBySession, getSessionElements, clearSession, broadcast } from './model.js'
+import { wsBySession, getSessionElements, clearSession } from './model.js'
 
 const PORT = process.env.PORT || 3000
 const app = express()
@@ -44,36 +44,6 @@ app.use((req, res, next) => {
     res.cookie('mcp_sid', sid, { maxAge: 86400000, httpOnly: false, sameSite: 'lax' })
   }
   next()
-})
-
-// Frontend API — matches what mcp_excalidraw frontend expects
-app.get('/api/elements', (req, res) => {
-  const els = [...getSessionElements(sessionId(req)).values()]
-  res.json({ success: true, elements: els, count: els.length })
-})
-
-app.post('/api/chat', async (req, res) => {
-  const { message } = req.body
-  if (!message) return void res.json({ success: false, response: 'Message is required' })
-  try {
-    const result = await agent(message, sessionId(req))
-    // Parse log into structured format
-    const thoughts: string[] = []
-    const tools: { name: string; args: string }[] = []
-    for (const line of result.log) {
-      const toolMatch = line.match(/^\s*🛠\s+(\w+)\((.*)\)$/)
-      if (toolMatch) {
-        tools.push({ name: toolMatch[1], args: toolMatch[2].slice(0, 60) })
-      } else if (!line.startsWith('✅') && !line.startsWith('⚠️')) {
-        // Skip emoji-only lines, keep AI thoughts
-        const clean = line.replace(/^🤖\s*/, '')
-        if (clean) thoughts.push(clean)
-      }
-    }
-    res.json({ success: true, response: result.log.join('\n'), tools, thoughts })
-  } catch (err: any) {
-    res.json({ success: false, response: err.message })
-  }
 })
 
 // User-facing API
