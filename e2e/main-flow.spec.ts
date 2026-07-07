@@ -45,7 +45,7 @@ test('model functions work via agent tools (import bypass test)', async () => {
   const initMsg = await new Promise<any>((resolve) => {
     ws.on('message', (data: Buffer) => resolve(JSON.parse(data.toString())))
   })
-  expect(initMsg.type).toBe('init')
+  expect(initMsg.type).toBe('initial_elements')
   expect(initMsg.elements).toEqual([])
   ws.close()
 })
