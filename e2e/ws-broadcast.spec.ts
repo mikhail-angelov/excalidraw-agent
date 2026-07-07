@@ -15,7 +15,9 @@ test.beforeAll(async () => {
   wss = new WebSocketServer({ server })
 
   wss.on('connection', (ws: any, req: any) => {
-    const sid = req.headers['x-session-id'] as string || 'default'
+    const cookies = req.headers.cookie || ''
+    const match = cookies.match(/mcp_sid=([^;]+)/)
+    const sid = match ? match[1] : 'default'
     if (!model.wsBySession.has(sid)) model.wsBySession.set(sid, new Set())
     model.wsBySession.get(sid)!.add(ws)
     ws.send(JSON.stringify({ type: 'init', elements: [...model.getSessionElements(sid).values()] }))
@@ -33,7 +35,7 @@ test.afterAll(() => { server?.close(); wss?.close() })
 
 test('WebSocket receives element_created broadcast', async () => {
   const { default: WebSocket } = await import('ws') as any
-  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'X-Session-Id': SID } })
+  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
   const messages: any[] = []
   ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
   await new Promise<void>(r => ws.on('open', r))
@@ -48,7 +50,7 @@ test('WebSocket receives element_created broadcast', async () => {
 
 test('WebSocket receives batch_created and element_updated', async () => {
   const { default: WebSocket } = await import('ws') as any
-  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'X-Session-Id': SID } })
+  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
   const messages: any[] = []
   ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
   await new Promise<void>(r => ws.on('open', r))
@@ -71,7 +73,7 @@ test('WebSocket receives batch_created and element_updated', async () => {
 
 test('WebSocket receives delete and clear events', async () => {
   const { default: WebSocket } = await import('ws') as any
-  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'X-Session-Id': SID } })
+  const ws = new WebSocket(`ws://localhost:${PORT}`, { headers: { 'Cookie': 'mcp_sid=ws-test' } })
   const messages: any[] = []
   ws.on('message', (data: Buffer) => messages.push(JSON.parse(data.toString())))
   await new Promise<void>(r => ws.on('open', r))
