@@ -170,12 +170,23 @@ const validateAndFixBindings = (
 function App(): JSX.Element {
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawAPIRefValue | null>(null);
+  const pendingElements = useRef<any[] | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const websocketRef = useRef<WebSocket | null>(null);
   const setApi = (api: any) => {
     console.log("look at api:", api);
     setExcalidrawAPI(api);
   };
+
+  // Apply pending elements when API becomes available
+  useEffect(() => {
+    if (excalidrawAPI && pendingElements.current) {
+      const cleaned = pendingElements.current.map(cleanElementForExcalidraw);
+      const converted = convertToExcalidrawElements(cleaned, { regenerateIds: false });
+      excalidrawAPI.updateScene({ elements: converted, captureUpdate: CaptureUpdateAction.NEVER });
+      pendingElements.current = null;
+    }
+  }, [excalidrawAPI]);
   // Sync state management
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
@@ -247,7 +258,20 @@ function App(): JSX.Element {
   }, [excalidrawAPI, isConnected]);
 
   const loadExistingElements = async (): Promise<void> => {
-    // No-op — elements arrive via WebSocket initial_elements on connect
+    // Reload all elements from server (called after agent completes)
+    try {
+      const response = await fetch("/api/scene")
+      if (response.ok) {
+        const data = await response.json()
+        if (data.elements && data.elements.length > 0) {
+          const cleaned = data.elements.map(cleanElementForExcalidraw)
+          const converted = convertToExcalidrawElements(cleaned, { regenerateIds: false })
+          excalidrawAPI?.updateScene({ elements: converted, captureUpdate: CaptureUpdateAction.NEVER })
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
   };
 
   const connectWebSocket = (): void => {
@@ -294,30 +318,33 @@ function App(): JSX.Element {
   const handleWebSocketMessage = async (
     data: WebSocketMessage,
   ): Promise<void> => {
-    if (!excalidrawAPI) {
+    if (!excalidrawAPI && data.type !== 'initial_elements') {
       return;
     }
 
     try {
-      const currentElements = excalidrawAPI.getSceneElements();
+      const currentElements = excalidrawAPI?.getSceneElements() || [];
       console.log("Current elements:", currentElements);
 
       switch (data.type) {
         case "initial_elements":
-          if (data.elements && data.elements.length > 0) {
-            const cleanedElements = data.elements.map(
-              cleanElementForExcalidraw,
-            );
-            const validatedElements = validateAndFixBindings(cleanedElements);
-            // Preserve server IDs so later update/delete websocket events can match by id.
-            const convertedElements = convertToExcalidrawElements(
-              validatedElements,
-              { regenerateIds: false },
-            );
-            excalidrawAPI.updateScene({
-              elements: convertedElements,
-              captureUpdate: CaptureUpdateAction.NEVER,
-            });
+          if (data.elements) {
+            if (!excalidrawAPI) {
+              // Cache elements for when Excalidraw API becomes available
+              pendingElements.current = data.elements;
+            } else {
+              const cleanedElements = data.elements.map(
+                cleanElementForExcalidraw,
+              );
+              const convertedElements = convertToExcalidrawElements(
+                cleanedElements,
+                { regenerateIds: false },
+              );
+              excalidrawAPI?.updateScene({
+                elements: convertedElements,
+                captureUpdate: CaptureUpdateAction.NEVER,
+              });
+            }
           }
           break;
 
@@ -861,6 +888,8 @@ function App(): JSX.Element {
         streamingMessageIdRef.current = null;
         setCurrentStreamingMessageId(null);
         setAiStatus("idle");
+        // Reload scene after agent completes
+        await loadExistingElements();
       } else {
         throw new Error(result.error || "Unknown error from agent API");
       }
