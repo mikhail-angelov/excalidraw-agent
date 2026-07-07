@@ -1,4 +1,4 @@
-// Shared model — singleton, both REST (if needed) and agent tools use the same state
+// Shared model — singleton, agent tools use the same state
 
 export const sessions = new Map<string, Map<string, any>>()
 export const wsBySession = new Map<string, Set<any>>()
@@ -32,10 +32,8 @@ export function addElement(sid: string, el: any): any {
   const full = { id: crypto.randomUUID(), ...el }
   if (full.type === 'arrow' || full.type === 'line') resolveArrow(full, els)
   els.set(full.id, full)
-  // Populate boundElements on connected shapes
   if (full.start?.id) addBoundElement(sid, full.start.id, full.id, 'arrow')
   if (full.end?.id) addBoundElement(sid, full.end.id, full.id, 'arrow')
-  broadcast(sid, { type: 'element_created', element: full })
   return full
 }
 
@@ -47,42 +45,38 @@ export function updateElement(sid: string, id: string, data: any): any | null {
   const els = getSessionElements(sid)
   const el = els.get(id)
   if (!el) return null
+  if (el.locked) return null
   const updated = { ...el, ...data, id }
   els.set(id, updated)
-  broadcast(sid, { type: 'element_updated', element: updated })
   return updated
 }
 
 export function removeElement(sid: string, id: string): boolean {
   const els = getSessionElements(sid)
   if (!els.has(id)) return false
-  // Remove boundElements references from connected shapes
   const el = els.get(id)
+  if (el?.locked) return false
   if (el?.start?.id) removeBoundElement(sid, el.start.id, id)
   if (el?.end?.id) removeBoundElement(sid, el.end.id, id)
   els.delete(id)
-  broadcast(sid, { type: 'element_deleted', id })
   return true
 }
 
 export function batchAddElements(sid: string, elements: any[]): any[] {
   const els = getSessionElements(sid)
+  // Two-pass: 1) create all elements, 2) resolve arrows with full map
   const created = elements.map((el: any) => {
     const full = { id: crypto.randomUUID(), ...el }
-    if (full.type === 'arrow' || full.type === 'line') resolveArrow(full, els)
     els.set(full.id, full)
     return full
   })
-  // Populate boundElements for all arrows (two-pass: first create all, then link)
   for (const el of created) {
-    if ((el.type === 'arrow' || el.type === 'line') && el.start?.id) {
-      addBoundElement(sid, el.start.id, el.id, 'arrow')
-    }
-    if ((el.type === 'arrow' || el.type === 'line') && el.end?.id) {
-      addBoundElement(sid, el.end.id, el.id, 'arrow')
+    if (el.type === 'arrow' || el.type === 'line') {
+      resolveArrow(el, els)
+      if (el.start?.id) addBoundElement(sid, el.start.id, el.id, 'arrow')
+      if (el.end?.id) addBoundElement(sid, el.end.id, el.id, 'arrow')
     }
   }
-  broadcast(sid, { type: 'batch_created', elements: created })
   return created
 }
 
@@ -104,7 +98,6 @@ export function duplicateElement(sid: string, id: string): any | null {
   delete dup.start; delete dup.end
   delete dup.boundElements; delete dup.startBinding; delete dup.endBinding
   els.set(dup.id, dup)
-  broadcast(sid, { type: 'element_created', element: dup })
   return dup
 }
 
@@ -138,7 +131,6 @@ export function groupElements(sid: string, elementIds: string[]): any[] {
     el.groupIds = [...(el.groupIds || []), groupId]
     grouped.push(el)
   }
-  broadcast(sid, { type: 'elements_grouped', groupId, elementIds })
   return grouped
 }
 
@@ -151,7 +143,6 @@ export function ungroupElements(sid: string, groupId: string): any[] {
       ungrouped.push(el)
     }
   }
-  broadcast(sid, { type: 'elements_ungrouped', groupId })
   return ungrouped
 }
 
@@ -159,19 +150,13 @@ export function ungroupElements(sid: string, groupId: string): any[] {
 
 export function lockElements(sid: string, elementIds: string[]): boolean {
   const els = getSessionElements(sid)
-  for (const id of elementIds) {
-    const el = els.get(id)
-    if (el) { el.locked = true; broadcast(sid, { type: 'element_updated', element: el }) }
-  }
+  for (const id of elementIds) { const el = els.get(id); if (el) el.locked = true }
   return true
 }
 
 export function unlockElements(sid: string, elementIds: string[]): boolean {
   const els = getSessionElements(sid)
-  for (const id of elementIds) {
-    const el = els.get(id)
-    if (el) { el.locked = false; broadcast(sid, { type: 'element_updated', element: el }) }
-  }
+  for (const id of elementIds) { const el = els.get(id); if (el) el.locked = false }
   return true
 }
 
@@ -188,12 +173,9 @@ export function alignElements(sid: string, elementIds: string[], alignment: stri
   const bottom = Math.max(...targets.map((e: any) => e.y + (e.height || 0)))
   const centerX = left + (right - left) / 2
   const centerY = top + (bottom - top) / 2
-  const midX = targets.reduce((s: number, e: any) => s + e.x + (e.width || 0) / 2, 0) / targets.length
-  const midY = targets.reduce((s: number, e: any) => s + e.y + (e.height || 0) / 2, 0) / targets.length
 
   for (const el of targets) {
-    const w = el.width || 0
-    const h = el.height || 0
+    const w = el.width || 0; const h = el.height || 0
     switch (alignment) {
       case 'left': el.x = left; break
       case 'center': el.x = centerX - w / 2; break
@@ -202,7 +184,6 @@ export function alignElements(sid: string, elementIds: string[], alignment: stri
       case 'middle': el.y = centerY - h / 2; break
       case 'bottom': el.y = bottom - h; break
     }
-    broadcast(sid, { type: 'element_updated', element: el })
   }
   return true
 }
@@ -213,21 +194,14 @@ export function distributeElements(sid: string, elementIds: string[], direction:
     direction === 'horizontal' ? a.x - b.x : a.y - b.y
   )
   if (targets.length < 2) return false
-
   const totalSize = targets.reduce((s: number, e: any) => s + (direction === 'horizontal' ? (e.width || 0) : (e.height || 0)), 0)
-  const first = targets[0]
-  const last = targets[targets.length - 1]
-  const span = direction === 'horizontal'
-    ? (last.x + (last.width || 0)) - first.x
-    : (last.y + (last.height || 0)) - first.y
+  const first = targets[0]; const last = targets[targets.length - 1]
+  const span = direction === 'horizontal' ? (last.x + (last.width || 0)) - first.x : (last.y + (last.height || 0)) - first.y
   const gap = (span - totalSize) / (targets.length - 1)
-
   let pos = direction === 'horizontal' ? first.x : first.y
   for (const el of targets) {
-    if (direction === 'horizontal') el.x = pos
-    else el.y = pos
+    if (direction === 'horizontal') el.x = pos; else el.y = pos
     pos += (direction === 'horizontal' ? (el.width || 0) : (el.height || 0)) + gap
-    broadcast(sid, { type: 'element_updated', element: el })
   }
   return true
 }
@@ -235,10 +209,8 @@ export function distributeElements(sid: string, elementIds: string[], direction:
 // --- Snapshot ---
 
 export function snapshotScene(sid: string, name: string): boolean {
-  const els = getSessionElements(sid)
   const snap = getSessionSnapshots(sid)
-  snap.set(name, { name, elements: [...els.values()].map(e => JSON.parse(JSON.stringify(e))), createdAt: new Date().toISOString() })
-  broadcast(sid, { type: 'snapshot_created', name })
+  snap.set(name, { name, elements: [...getSessionElements(sid).values()].map(e => JSON.parse(JSON.stringify(e))), createdAt: new Date().toISOString() })
   return true
 }
 
@@ -248,7 +220,7 @@ export function restoreSnapshot(sid: string, name: string): boolean {
   const els = getSessionElements(sid)
   els.clear()
   for (const el of snap.elements) els.set(el.id, JSON.parse(JSON.stringify(el)))
-  broadcast(sid, { type: 'snapshot_restored', name, count: snap.elements.length })
+  broadcast(sid, { type: 'canvas_cleared' })
   return true
 }
 
@@ -265,9 +237,8 @@ function addBoundElement(sid: string, targetId: string, boundId: string, boundTy
   const el = getSessionElements(sid).get(targetId)
   if (!el) return
   if (!el.boundElements) el.boundElements = []
-  if (!el.boundElements.some((b: any) => b.id === boundId)) {
+  if (!el.boundElements.some((b: any) => b.id === boundId))
     el.boundElements.push({ id: boundId, type: boundType })
-  }
 }
 
 function removeBoundElement(sid: string, targetId: string, boundId: string) {
@@ -279,7 +250,6 @@ function removeBoundElement(sid: string, targetId: string, boundId: string) {
 // --- Arrow binding ---
 
 export function resolveArrow(arrow: any, allElements: Map<string, any>) {
-  // The agent sends startElementId/endElementId, the UI sends start/end
   const startId = arrow.startElementId || arrow.start?.id
   const endId = arrow.endElementId || arrow.end?.id
   const startEl = startId ? allElements.get(startId) : null
@@ -289,7 +259,6 @@ export function resolveArrow(arrow: any, allElements: Map<string, any>) {
   const sc = startEl ? center(startEl) : { x: arrow.x, y: arrow.y }
   const ec = endEl ? center(endEl) : { x: arrow.x + 100, y: arrow.y + 30 }
 
-  // Edge points
   const startPt = startEl ? edgePoint(startEl, ec.x, ec.y, GAP) : sc
   const endPt = endEl ? edgePoint(endEl, sc.x, sc.y, GAP) : ec
 
@@ -298,10 +267,8 @@ export function resolveArrow(arrow: any, allElements: Map<string, any>) {
   arrow.points = [[0, 0], [endPt.x - startPt.x, endPt.y - startPt.y]]
   arrow.start = { id: startId }
   arrow.end = { id: endId }
-  // Populate binding objects for Excalidraw UI
-  const gapDist = 8
-  arrow.startBinding = startEl ? { elementId: startId, focus: 0, gap: gapDist } : undefined
-  arrow.endBinding = endEl ? { elementId: endId, focus: 0, gap: gapDist } : undefined
+  arrow.startBinding = startEl ? { elementId: startId, focus: 0, gap: 8 } : undefined
+  arrow.endBinding = endEl ? { elementId: endId, focus: 0, gap: 8 } : undefined
 }
 
 function center(el: any) {
@@ -309,8 +276,7 @@ function center(el: any) {
 }
 
 function edgePoint(el: any, targetX: number, targetY: number, gap: number): { x: number; y: number } {
-  const cx = el.x + (el.width || 100) / 2
-  const cy = el.y + (el.height || 60) / 2
+  const cx = el.x + (el.width || 100) / 2, cy = el.y + (el.height || 60) / 2
   const dx = targetX - cx, dy = targetY - cy
 
   if (el.type === 'diamond') {
@@ -319,25 +285,19 @@ function edgePoint(el: any, targetX: number, targetY: number, gap: number): { x:
     const scale = absSum > 0 ? 1 / absSum : 1
     return { x: cx + dx * scale + (dx > 0 ? gap : -gap), y: cy + dy * scale + (dy > 0 ? gap : -gap) }
   }
-
   if (el.type === 'ellipse') {
     const a = (el.width || 100) / 2, b = (el.height || 60) / 2
     const angle = Math.atan2(dy, dx)
-    const px = cx + a * Math.cos(angle), py = cy + b * Math.sin(angle)
-    const gx = dx > 0 ? gap : -gap, gy = dy > 0 ? gap : -gap
-    return { x: px + gx, y: py + gy }
+    return { x: cx + a * Math.cos(angle) + (dx > 0 ? gap : -gap), y: cy + b * Math.sin(angle) + (dy > 0 ? gap : -gap) }
   }
-
-  // Rectangle: intersect edge
+  // Rectangle
   const hw = (el.width || 100) / 2, hh = (el.height || 60) / 2
   const absDx = Math.abs(dx), absDy = Math.abs(dy)
   let scale: number
   if (absDx === 0 && absDy === 0) scale = 0
   else if (absDx * hh > absDy * hw) scale = hw / absDx
   else scale = hh / absDy
-  const ex = cx + dx * scale, ey = cy + dy * scale
-  const gx = dx > 0 ? gap : -gap, gy = dy > 0 ? gap : -gap
-  return { x: ex + gx, y: ey + gy }
+  return { x: cx + dx * scale + (dx > 0 ? gap : -gap), y: cy + dy * scale + (dy > 0 ? gap : -gap) }
 }
 
 // --- Design guide ---
@@ -375,18 +335,14 @@ Light Red #ffc9c9, Light Green #b2f2bb, Light Blue #a5d8ff, Light Purple #eebefa
 
 export function getResource(sid: string, resource: string): any {
   switch (resource) {
-    case 'scene':
-      return { elements: [...getSessionElements(sid).values()] }
-    case 'elements':
-      return [...getSessionElements(sid).values()]
-    case 'theme':
-      return { theme: 'light' }
-    default:
-      return null
+    case 'scene': return { elements: [...getSessionElements(sid).values()] }
+    case 'elements': return [...getSessionElements(sid).values()]
+    case 'theme': return { theme: 'light' }
+    default: return null
   }
 }
 
-// --- Re-route bound arrows (for move operations) ---
+// --- Re-route bound arrows ---
 
 export function rerouteBoundArrows(sid: string, movedId: string): any[] {
   const els = getSessionElements(sid)
