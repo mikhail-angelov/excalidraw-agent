@@ -11,7 +11,7 @@ const wss = new WebSocketServer({ server })
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-// In-memory canvas state (one global session for simplicity)
+// In-memory state
 const elements = new Map()
 const wsClients = new Set()
 
@@ -26,11 +26,27 @@ function broadcast(msg) {
   wsClients.forEach(c => c.readyState === 1 && c.send(data))
 }
 
-// REST API — the only interface the agent needs
-app.get('/api/elements', (_, res) =>
-  res.json({ elements: [...elements.values()], count: elements.size })
-)
+// GET /api/elements — list all (+ optional bbox filter)
+app.get('/api/elements', (req, res) => {
+  let result = [...elements.values()]
 
+  // Bounding box filter: ?x_min=&x_max=&y_min=&y_max=
+  const { x_min, x_max, y_min, y_max } = req.query
+  if (x_min || x_max || y_min || y_max) {
+    const xMin = x_min ? Number(x_min) : -Infinity
+    const xMax = x_max ? Number(x_max) : Infinity
+    const yMin = y_min ? Number(y_min) : -Infinity
+    const yMax = y_max ? Number(y_max) : Infinity
+    result = result.filter(el =>
+      el.x >= xMin && el.x <= xMax &&
+      el.y >= yMin && el.y <= yMax
+    )
+  }
+
+  res.json({ elements: result, count: result.length })
+})
+
+// POST /api/elements — create
 app.post('/api/elements', (req, res) => {
   const el = { id: crypto.randomUUID(), ...req.body }
   elements.set(el.id, el)
@@ -38,6 +54,7 @@ app.post('/api/elements', (req, res) => {
   res.json({ element: el })
 })
 
+// PUT /api/elements/:id — update
 app.put('/api/elements/:id', (req, res) => {
   const el = elements.get(req.params.id)
   if (!el) return res.status(404).json({ error: 'not found' })
@@ -47,6 +64,7 @@ app.put('/api/elements/:id', (req, res) => {
   res.json({ element: updated })
 })
 
+// DELETE /api/elements/:id
 app.delete('/api/elements/:id', (req, res) => {
   if (!elements.has(req.params.id))
     return res.status(404).json({ error: 'not found' })
@@ -55,6 +73,7 @@ app.delete('/api/elements/:id', (req, res) => {
   res.json({ success: true })
 })
 
+// POST /api/elements/batch — batch create
 app.post('/api/elements/batch', (req, res) => {
   const created = (req.body.elements || []).map(el => {
     const full = { id: crypto.randomUUID(), ...el }
@@ -65,6 +84,7 @@ app.post('/api/elements/batch', (req, res) => {
   res.json({ elements: created, count: created.length })
 })
 
+// DELETE /api/elements — clear all
 app.delete('/api/elements', (_, res) => {
   const count = elements.size
   elements.clear()
@@ -72,4 +92,4 @@ app.delete('/api/elements', (_, res) => {
   res.json({ cleared: count })
 })
 
-server.listen(PORT, () => console.log(`Canvas server on http://localhost:${PORT}`))
+server.listen(PORT, () => console.log(`Canvas on http://localhost:${PORT}`))
