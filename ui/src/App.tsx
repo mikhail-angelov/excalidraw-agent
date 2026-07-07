@@ -167,6 +167,28 @@ const validateAndFixBindings = (
   });
 };
 
+// Extract text from shapes — create separate text elements for Excalidraw
+const extractTextElements = (elements: any[]): any[] => {
+  const result: any[] = [];
+  for (const el of elements) {
+    result.push(el);
+    if (el.text && el.type !== 'text') {
+      const textEl: any = {
+        id: `${el.id}-text`, type: 'text',
+        x: el.x + (el.width || 100) / 2 - 30, y: el.y + 10,
+        width: 60, height: 20,
+        text: el.text, fontSize: el.fontSize || 16,
+        containerId: el.id,
+      };
+      if (!el.boundElements) el.boundElements = [];
+      if (!el.boundElements.some((b: any) => b.id === textEl.id))
+        el.boundElements.push({ id: textEl.id, type: 'text' });
+      result.push(textEl);
+    }
+  }
+  return result;
+};
+
 function App(): JSX.Element {
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawAPIRefValue | null>(null);
@@ -253,7 +275,8 @@ function App(): JSX.Element {
 
       if (result.success && result.elements && result.elements.length > 0) {
         const cleanedElements = result.elements.map(cleanElementForExcalidraw);
-        const convertedElements = convertToExcalidrawElements(cleanedElements, {
+        const extractedElements = extractTextElements(cleanedElements);
+        const convertedElements = convertToExcalidrawElements(extractedElements, {
           regenerateIds: false,
         });
         excalidrawAPI?.updateScene({ elements: convertedElements });
@@ -924,6 +947,9 @@ function App(): JSX.Element {
         setCurrentStreamingMessageId(null);
         setAiStatus("idle");
         await syncToBackend();
+        // Clear canvas and reload all elements (batch render after model build)
+        excalidrawAPI?.updateScene({ elements: [], captureUpdate: CaptureUpdateAction.NEVER })
+        loadExistingElements();
       } else {
         throw new Error(result.error || "Unknown error from chat API");
       }
