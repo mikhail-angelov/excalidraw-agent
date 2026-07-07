@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { agent } from './agent.js'
-import { wsBySession, getSessionElements, clearSession } from './model.js'
+import { wsBySession, getSessionElements, clearSession, broadcast } from './model.js'
 
 const PORT = process.env.PORT || 3000
 const AGENT_TOKEN = process.env.AGENT_TOKEN || ''
@@ -98,6 +98,11 @@ app.post('/api/agent', async (req, res) => {
 
   try {
     const result = await agent(prompt, sid)
+    // Broadcast updated scene to browser after agent completes
+    broadcast(sid, {
+      type: 'scene_updated',
+      elements: [...getSessionElements(sid).values()],
+    })
     res.json(result)
   } catch (err: any) {
     res.status(500).json({ error: err.message })
