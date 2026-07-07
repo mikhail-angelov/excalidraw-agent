@@ -1,12 +1,12 @@
+import { getSessionElements, addElement, updateElement, removeElement, batchAddElements, clearSession } from './model.js'
+
 export interface ToolDefinition {
   name: string
   description: string
   parameters: Record<string, any>
 }
 
-const API = 'http://localhost:3000/api'
-
-const TOOLS: ToolDefinition[] = [
+export const TOOLS: ToolDefinition[] = [
   {
     name: 'create_element',
     description: 'Create an element on the canvas',
@@ -89,47 +89,31 @@ const TOOLS: ToolDefinition[] = [
   }
 ]
 
-async function runTool(name: string, args: Record<string, any>, sessionId = 'default'): Promise<any> {
-  const h = { 'Content-Type': 'application/json', 'X-Session-Id': sessionId }
-
+export function runTool(name: string, args: Record<string, any>, sessionId: string): any {
   switch (name) {
     case 'create_element':
-      return (await fetch(`${API}/elements`, {
-        method: 'POST', headers: h, body: JSON.stringify(args)
-      })).json()
+      return addElement(sessionId, args)
 
     case 'batch_create':
-      return (await fetch(`${API}/elements/batch`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
-        body: JSON.stringify({ elements: args.elements })
-      })).json()
+      return batchAddElements(sessionId, args.elements || [])
 
     case 'update_element':
-      return (await fetch(`${API}/elements/${args.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
-        body: JSON.stringify(args)
-      })).json()
+      return updateElement(sessionId, args.id, args)
 
     case 'delete_element':
-      return (await fetch(`${API}/elements/${args.id}`, {
-        method: 'DELETE', headers: { 'X-Session-Id': sessionId }
-      })).json()
+      return removeElement(sessionId, args.id)
 
     case 'clear_canvas':
-      return (await fetch(`${API}/elements`, {
-        method: 'DELETE', headers: { 'X-Session-Id': sessionId }
-      })).json()
+      return clearSession(sessionId)
 
-    case 'get_scene':
-      const res = await fetch(`${API}/elements`, { headers: { 'X-Session-Id': sessionId } })
-      const data = await res.json()
-      return data.elements.length === 0
+    case 'get_scene': {
+      const els = [...getSessionElements(sessionId).values()]
+      return els.length === 0
         ? 'Canvas is empty'
-        : data.elements.map((e: any) => `[${e.type}] "${e.text || ''}" at (${e.x}, ${e.y})`).join('\n')
+        : els.map((e: any) => `[${e.type}] "${e.text || ''}" at (${e.x}, ${e.y})`).join('\n')
+    }
 
     default:
       return `Unknown tool: ${name}`
   }
 }
-
-export { TOOLS, runTool }

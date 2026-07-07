@@ -1,31 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { spawn } from 'child_process'
 import { setTimeout } from 'timers/promises'
 
 const BASE = 'http://localhost:3000'
 const SID = { 'X-Session-Id': 'test-session' }
 const JSON_H = { 'Content-Type': 'application/json', ...SID }
-
-let serverProcess: any
-
-test.beforeAll(async () => {
-  serverProcess = spawn('npx', ['tsx', 'src/server.ts'], {
-    env: { ...process.env, PORT: '3000' },
-    stdio: 'pipe',
-    shell: true
-  })
-  for (let i = 0; i < 30; i++) {
-    try {
-      const res = await fetch(`${BASE}/health`)
-      if (res.ok) break
-    } catch {}
-    await setTimeout(500)
-  }
-})
-
-test.afterAll(() => {
-  if (serverProcess) serverProcess.kill()
-})
 
 test.beforeEach(async () => {
   await fetch(`${BASE}/api/clear`, { method: 'POST', headers: SID })
