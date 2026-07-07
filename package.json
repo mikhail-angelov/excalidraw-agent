@@ -1,0 +1,23 @@
+{
+  "name": "excalidraw-agent",
+  "version": "1.0.0",
+  "description": "Minimal AI agent that draws on an Excalidraw canvas",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "agent": "node src/agent.js",
+    "build": "node -e \"require('fs').cpSync('src','dist',{recursive:true}); console.log('Built: src/ → dist/')\"",
+    "build:server": "npm run build",
+    "build:frontend": "echo 'No frontend build needed'",
+    "production": "npm run build && PORT=3000 HOST=0.0.0.0 node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
