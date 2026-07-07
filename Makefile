@@ -1,8 +1,11 @@
 IMAGE_NAME = ghcr.io/mikhail-angelov/excalidraw-agent:latest
 
-.PHONY: build push deploy logs status
+.PHONY: build dist push deploy logs status
 
-build:
+dist:
+	npm ci && npm run build
+
+build: dist
 	docker build -t $(IMAGE_NAME) .
 
 push: build
