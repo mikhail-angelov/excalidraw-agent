@@ -21,7 +21,9 @@ const TOOLS = [
         text: { type: 'string' },
         backgroundColor: { type: 'string' },
         strokeColor: { type: 'string' },
-        fontSize: { type: 'number' }
+        fontSize: { type: 'number' },
+        startElementId: { type: 'string', description: 'For arrows: bind start to this element ID' },
+        endElementId: { type: 'string', description: 'For arrows: bind end to this element ID' }
       },
       required: ['type', 'x', 'y']
     }
