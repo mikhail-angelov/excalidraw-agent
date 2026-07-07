@@ -12,8 +12,8 @@ app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
 // In-memory state
-const elements = new Map()
-const wsClients = new Set()
+const elements = new Map<string, any>()
+const wsClients = new Set<WebSocket>()
 
 wss.on('connection', (ws) => {
   wsClients.add(ws)
@@ -21,7 +21,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => wsClients.delete(ws))
 })
 
-function broadcast(msg) {
+function broadcast(msg: any) {
   const data = JSON.stringify(msg)
   wsClients.forEach(c => c.readyState === 1 && c.send(data))
 }
@@ -30,14 +30,13 @@ function broadcast(msg) {
 app.get('/api/elements', (req, res) => {
   let result = [...elements.values()]
 
-  // Bounding box filter: ?x_min=&x_max=&y_min=&y_max=
-  const { x_min, x_max, y_min, y_max } = req.query
+  const { x_min, x_max, y_min, y_max } = req.query as Record<string, string | undefined>
   if (x_min || x_max || y_min || y_max) {
     const xMin = x_min ? Number(x_min) : -Infinity
     const xMax = x_max ? Number(x_max) : Infinity
     const yMin = y_min ? Number(y_min) : -Infinity
     const yMax = y_max ? Number(y_max) : Infinity
-    result = result.filter(el =>
+    result = result.filter((el: any) =>
       el.x >= xMin && el.x <= xMax &&
       el.y >= yMin && el.y <= yMax
     )
@@ -48,9 +47,8 @@ app.get('/api/elements', (req, res) => {
 
 // POST /api/elements — create
 app.post('/api/elements', (req, res) => {
-  const el = { id: crypto.randomUUID(), ...req.body }
+  const el: any = { id: crypto.randomUUID(), ...req.body }
 
-  // Resolve arrow bindings: convert startElementId/endElementId → start/end + points
   if (el.type === 'arrow' || el.type === 'line') {
     resolveArrow(el, elements)
   }
@@ -63,7 +61,7 @@ app.post('/api/elements', (req, res) => {
 // PUT /api/elements/:id — update
 app.put('/api/elements/:id', (req, res) => {
   const el = elements.get(req.params.id)
-  if (!el) return res.status(404).json({ error: 'not found' })
+  if (!el) return void res.status(404).json({ error: 'not found' })
   const updated = { ...el, ...req.body, id: el.id }
   elements.set(el.id, updated)
   broadcast({ type: 'element_updated', element: updated })
@@ -73,7 +71,7 @@ app.put('/api/elements/:id', (req, res) => {
 // DELETE /api/elements/:id
 app.delete('/api/elements/:id', (req, res) => {
   if (!elements.has(req.params.id))
-    return res.status(404).json({ error: 'not found' })
+    return void res.status(404).json({ error: 'not found' })
   elements.delete(req.params.id)
   broadcast({ type: 'element_deleted', id: req.params.id })
   res.json({ success: true })
@@ -81,7 +79,7 @@ app.delete('/api/elements/:id', (req, res) => {
 
 // POST /api/elements/batch — batch create
 app.post('/api/elements/batch', (req, res) => {
-  const created = (req.body.elements || []).map(el => {
+  const created = (req.body.elements || []).map((el: any) => {
     const full = { id: crypto.randomUUID(), ...el }
     if (full.type === 'arrow' || full.type === 'line') {
       resolveArrow(full, elements)
@@ -94,28 +92,36 @@ app.post('/api/elements/batch', (req, res) => {
 })
 
 // DELETE /api/elements — clear all
-app.delete('/api/elements', (_, res) => {
+app.delete('/api/elements', (_req, res) => {
   const count = elements.size
   elements.clear()
   broadcast({ type: 'canvas_cleared' })
   res.json({ cleared: count })
 })
 
-server.listen(PORT, () => console.log(`Canvas on http://localhost:${PORT}`))
+// GET /api/health
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', elements: elements.size })
+})
 
-// === Arrow binding resolver ===
-// Когда агент создаёт стрелку с startElementId/endElementId,
-// конвертируем их в start/end + points для корректного рендера.
+// Serve static frontend
+const path = await import('path')
+const __dirname = path.dirname(new URL(import.meta.url).pathname)
+const staticDir = path.join(__dirname, '../dist/ui')
+app.use(express.static(staticDir))
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(staticDir, 'index.html'))
+})
 
-function resolveArrow(arrow, allElements) {
+server.listen(Number(PORT), () => console.log(`Canvas on http://localhost:${PORT}`))
+
+// Arrow binding
+function resolveArrow(arrow: any, allElements: Map<string, any>) {
   const startId = arrow.startElementId || arrow.start?.id
   const endId = arrow.endElementId || arrow.end?.id
-
   const startEl = startId ? allElements.get(startId) : null
   const endEl = endId ? allElements.get(endId) : null
-
-  const GAP = 8
-  const defW = 100, defH = 60
+  const GAP = 8, defW = 100, defH = 60
 
   const sc = startEl
     ? { x: startEl.x + (startEl.width || defW) / 2, y: startEl.y + (startEl.height || defH) / 2 }
@@ -127,14 +133,9 @@ function resolveArrow(arrow, allElements) {
   const dx = ec.x - sc.x, dy = ec.y - sc.y
   const dist = Math.sqrt(dx * dx + dy * dy) || 1
 
-  const sx = sc.x + (dx / dist) * GAP
-  const sy = sc.y + (dy / dist) * GAP
-  const ex = ec.x - (dx / dist) * GAP
-  const ey = ec.y - (dy / dist) * GAP
-
-  arrow.x = sx
-  arrow.y = sy
-  arrow.points = [[0, 0], [ex - sx, ey - sy]]
+  arrow.x = sc.x + (dx / dist) * GAP
+  arrow.y = sc.y + (dy / dist) * GAP
+  arrow.points = [[0, 0], [ec.x - (dx / dist) * GAP - arrow.x, ec.y - (dy / dist) * GAP - arrow.y]]
   arrow.start = { id: startId }
   arrow.end = { id: endId }
 }
