@@ -89,34 +89,39 @@ const TOOLS: ToolDefinition[] = [
   }
 ]
 
-async function runTool(name: string, args: Record<string, any>): Promise<any> {
+async function runTool(name: string, args: Record<string, any>, sessionId = 'default'): Promise<any> {
+  const h = { 'Content-Type': 'application/json', 'X-Session-Id': sessionId }
+
   switch (name) {
     case 'create_element':
       return (await fetch(`${API}/elements`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(args)
+        method: 'POST', headers: h, body: JSON.stringify(args)
       })).json()
 
     case 'batch_create':
       return (await fetch(`${API}/elements/batch`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
         body: JSON.stringify({ elements: args.elements })
       })).json()
 
     case 'update_element':
       return (await fetch(`${API}/elements/${args.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Session-Id': sessionId },
         body: JSON.stringify(args)
       })).json()
 
     case 'delete_element':
-      return (await fetch(`${API}/elements/${args.id}`, { method: 'DELETE' })).json()
+      return (await fetch(`${API}/elements/${args.id}`, {
+        method: 'DELETE', headers: { 'X-Session-Id': sessionId }
+      })).json()
 
     case 'clear_canvas':
-      return (await fetch(`${API}/elements`, { method: 'DELETE' })).json()
+      return (await fetch(`${API}/elements`, {
+        method: 'DELETE', headers: { 'X-Session-Id': sessionId }
+      })).json()
 
     case 'get_scene':
-      const res = await fetch(`${API}/elements`)
+      const res = await fetch(`${API}/elements`, { headers: { 'X-Session-Id': sessionId } })
       const data = await res.json()
       return data.elements.length === 0
         ? 'Canvas is empty'

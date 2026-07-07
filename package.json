@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "start": "tsx src/server.ts",
-    "agent": "tsx src/agent.ts",
     "build:server": "tsc",
     "build:ui": "vite build",
     "build": "npm run build:ui && npm run build:server",
