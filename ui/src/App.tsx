@@ -247,20 +247,7 @@ function App(): JSX.Element {
   }, [excalidrawAPI, isConnected]);
 
   const loadExistingElements = async (): Promise<void> => {
-    try {
-      const response = await fetch("/api/elements");
-      const result: ApiResponse = await response.json();
-
-      if (result.success && result.elements && result.elements.length > 0) {
-        const cleanedElements = result.elements.map(cleanElementForExcalidraw);
-        const convertedElements = convertToExcalidrawElements(cleanedElements, {
-          regenerateIds: false,
-        });
-        excalidrawAPI?.updateScene({ elements: convertedElements });
-      }
-    } catch (error) {
-      console.error("Error loading existing elements:", error);
-    }
+    // No-op — elements arrive via WebSocket initial_elements on connect
   };
 
   const connectWebSocket = (): void => {
@@ -458,6 +445,22 @@ function App(): JSX.Element {
             elements: [],
             captureUpdate: CaptureUpdateAction.NEVER,
           });
+          break;
+
+        case "scene_updated":
+          if (data.elements) {
+            const cleanedElements = data.elements.map(
+              cleanElementForExcalidraw,
+            );
+            const convertedElements = convertToExcalidrawElements(
+              cleanedElements,
+              { regenerateIds: false },
+            );
+            excalidrawAPI.updateScene({
+              elements: convertedElements,
+              captureUpdate: CaptureUpdateAction.NEVER,
+            });
+          }
           break;
 
         case "export_image_request":
@@ -780,82 +783,18 @@ function App(): JSX.Element {
 
   // Main sync function
   const syncToBackend = async (): Promise<void> => {
-    if (!excalidrawAPI) {
-      console.warn("Excalidraw API not available");
-      return;
-    }
-
-    setSyncStatus("syncing");
-
-    try {
-      // 1. Get current elements
-      const currentElements = excalidrawAPI.getSceneElements();
-      console.log(`Syncing ${currentElements.length} elements to backend`);
-
-      // Filter out deleted elements
-      const activeElements = currentElements.filter((el: any) => !el.isDeleted);
-
-      // 3. Convert to backend format
-      const backendElements = activeElements.map(convertToBackendFormat);
-
-      // 4. Send to backend
-      const response = await fetch("/api/elements/sync", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          elements: backendElements,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-
-      if (response.ok) {
-        const result: ApiResponse = await response.json();
-        setSyncStatus("success");
-        setLastSyncTime(new Date());
-        console.log(`Sync successful: ${result.count} elements synced`);
-
-        // Reset status after 2 seconds
-        setTimeout(() => setSyncStatus("idle"), 2000);
-      } else {
-        const error: ApiResponse = await response.json();
-        setSyncStatus("error");
-        console.error("Sync failed:", error.error);
-      }
-    } catch (error) {
-      setSyncStatus("error");
-      console.error("Sync error:", error);
-    }
+    // No-op — server manages state directly; elements arrive via WS
   };
 
   const clearCanvas = async (): Promise<void> => {
-    if (excalidrawAPI) {
-      try {
-        // Get all current elements and delete them from backend
-        const response = await fetch("/api/elements");
-        const result: ApiResponse = await response.json();
-
-        if (result.success && result.elements) {
-          const deletePromises = result.elements.map((element) =>
-            fetch(`/api/elements/${element.id}`, { method: "DELETE" }),
-          );
-          await Promise.all(deletePromises);
-        }
-
-        // Clear the frontend canvas
-        excalidrawAPI.updateScene({
-          elements: [],
-          captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-        });
-      } catch (error) {
-        console.error("Error clearing canvas:", error);
-        // Still clear frontend even if backend fails
-        excalidrawAPI.updateScene({
-          elements: [],
-          captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-        });
-      }
+    try {
+      await fetch("/api/clear", { method: "POST" });
+      excalidrawAPI?.updateScene({
+        elements: [],
+        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+      });
+    } catch (error) {
+      console.error("Error clearing canvas:", error);
     }
   };
 
@@ -884,29 +823,28 @@ function App(): JSX.Element {
     setCurrentStreamingMessageId(null);
 
     try {
-      // Call the new chat API
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/agent", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: userMessage.content,
+          prompt: userMessage.content,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const result = await response.json();
 
-      if (result.success) {
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+
+      if (result.log) {
         setAiMessages((prev) => {
           const streamId = streamingMessageIdRef.current;
           if (streamId) {
             return prev.map((m) =>
-              m.id === streamId ? { ...m, content: result.response } : m,
+              m.id === streamId ? { ...m, content: result.log.join("\n") } : m,
             );
           } else {
             return [
@@ -914,7 +852,7 @@ function App(): JSX.Element {
               {
                 id: (Date.now() + 1).toString(),
                 type: "assistant",
-                content: result.response,
+                content: result.log.join("\n"),
                 timestamp: new Date(),
               },
             ];
@@ -923,9 +861,8 @@ function App(): JSX.Element {
         streamingMessageIdRef.current = null;
         setCurrentStreamingMessageId(null);
         setAiStatus("idle");
-        await syncToBackend();
       } else {
-        throw new Error(result.error || "Unknown error from chat API");
+        throw new Error(result.error || "Unknown error from agent API");
       }
     } catch (error) {
       console.error("AI response error:", error);
@@ -994,33 +931,6 @@ function App(): JSX.Element {
                 className={`status-dot ${isConnected ? "status-connected" : "status-disconnected"}`}
               ></div>
               <span>{isConnected ? "Connected" : "Disconnected"}</span>
-            </div>
-
-            {/* Sync Controls */}
-            <div className="sync-controls">
-              <button
-                className={`btn-primary ${syncStatus === "syncing" ? "btn-loading" : ""}`}
-                onClick={syncToBackend}
-                disabled={syncStatus === "syncing" || !excalidrawAPI}
-              >
-                {syncStatus === "syncing" && <span className="spinner"></span>}
-                {syncStatus === "syncing" ? "Syncing..." : "Sync to Backend"}
-              </button>
-
-              {/* Sync Status */}
-              <div className="sync-status">
-                {syncStatus === "success" && (
-                  <span className="sync-success">✅ Synced</span>
-                )}
-                {syncStatus === "error" && (
-                  <span className="sync-error">❌ Sync Failed</span>
-                )}
-                {lastSyncTime && syncStatus === "idle" && (
-                  <span className="sync-time">
-                    Last sync: {formatSyncTime(lastSyncTime)}
-                  </span>
-                )}
-              </div>
             </div>
 
             <button className="btn-secondary" onClick={clearCanvas}>
