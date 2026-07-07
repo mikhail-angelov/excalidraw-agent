@@ -2,6 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import { createServer } from 'http'
 import { WebSocketServer } from 'ws'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const PORT = process.env.PORT || 3000
 const app = express()
@@ -13,7 +15,7 @@ app.use(express.json({ limit: '10mb' }))
 
 // In-memory state
 const elements = new Map<string, any>()
-const wsClients = new Set<WebSocket>()
+const wsClients = new Set<any>()
 
 wss.on('connection', (ws) => {
   wsClients.add(ws)
@@ -105,8 +107,7 @@ app.get('/health', (_req, res) => {
 })
 
 // Serve static frontend
-const path = await import('path')
-const __dirname = path.dirname(new URL(import.meta.url).pathname)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const staticDir = path.join(__dirname, '../dist/ui')
 app.use(express.static(staticDir))
 app.get('*', (_req, res) => {
