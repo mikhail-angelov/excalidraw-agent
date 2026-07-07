@@ -49,6 +49,12 @@ app.get('/api/elements', (req, res) => {
 // POST /api/elements — create
 app.post('/api/elements', (req, res) => {
   const el = { id: crypto.randomUUID(), ...req.body }
+
+  // Resolve arrow bindings: convert startElementId/endElementId → start/end + points
+  if (el.type === 'arrow' || el.type === 'line') {
+    resolveArrow(el, elements)
+  }
+
   elements.set(el.id, el)
   broadcast({ type: 'element_created', element: el })
   res.json({ element: el })
@@ -77,6 +83,9 @@ app.delete('/api/elements/:id', (req, res) => {
 app.post('/api/elements/batch', (req, res) => {
   const created = (req.body.elements || []).map(el => {
     const full = { id: crypto.randomUUID(), ...el }
+    if (full.type === 'arrow' || full.type === 'line') {
+      resolveArrow(full, elements)
+    }
     elements.set(full.id, full)
     return full
   })
@@ -93,3 +102,39 @@ app.delete('/api/elements', (_, res) => {
 })
 
 server.listen(PORT, () => console.log(`Canvas on http://localhost:${PORT}`))
+
+// === Arrow binding resolver ===
+// Когда агент создаёт стрелку с startElementId/endElementId,
+// конвертируем их в start/end + points для корректного рендера.
+
+function resolveArrow(arrow, allElements) {
+  const startId = arrow.startElementId || arrow.start?.id
+  const endId = arrow.endElementId || arrow.end?.id
+
+  const startEl = startId ? allElements.get(startId) : null
+  const endEl = endId ? allElements.get(endId) : null
+
+  const GAP = 8
+  const defW = 100, defH = 60
+
+  const sc = startEl
+    ? { x: startEl.x + (startEl.width || defW) / 2, y: startEl.y + (startEl.height || defH) / 2 }
+    : { x: arrow.x, y: arrow.y }
+  const ec = endEl
+    ? { x: endEl.x + (endEl.width || defW) / 2, y: endEl.y + (endEl.height || defH) / 2 }
+    : { x: arrow.x + 120, y: arrow.y }
+
+  const dx = ec.x - sc.x, dy = ec.y - sc.y
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1
+
+  const sx = sc.x + (dx / dist) * GAP
+  const sy = sc.y + (dy / dist) * GAP
+  const ex = ec.x - (dx / dist) * GAP
+  const ey = ec.y - (dy / dist) * GAP
+
+  arrow.x = sx
+  arrow.y = sy
+  arrow.points = [[0, 0], [ex - sx, ey - sy]]
+  arrow.start = { id: startId }
+  arrow.end = { id: endId }
+}
