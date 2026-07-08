@@ -4,12 +4,13 @@ import cookieParser from 'cookie-parser'
 import { createServer } from 'http'
 import { WebSocketServer } from 'ws'
 import path from 'path'
-import { fileURLToPath } from 'url'
-import { agent } from './agent.js'
-import { wsBySession, getSessionElements, clearSession, broadcast } from './model.js'
+import dotenv from 'dotenv';
+import { agent } from './agent'
+import { wsBySession, getSessionElements, clearSession, broadcast } from './model'
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const PORT = process.env.PORT || 3000
-const AGENT_TOKEN = process.env.AGENT_TOKEN || ''
 const isProduction = process.env.NODE_ENV === 'production'
 const app = express()
 const server = createServer(app)
@@ -85,12 +86,6 @@ app.post('/api/clear', (req, res) => {
 })
 
 app.post('/api/agent', async (req, res) => {
-  // AGENT_TOKEN guard
-  if (AGENT_TOKEN) {
-    const token = req.headers['authorization']?.replace('Bearer ', '') || req.query.token as string
-    if (token !== AGENT_TOKEN) return void res.status(401).json({ error: 'unauthorized' })
-  }
-
   const { prompt } = req.body
   if (!prompt) return void res.status(400).json({ error: 'prompt required' })
   if (typeof prompt !== 'string' || prompt.length > MAX_PROMPT_LENGTH) {
@@ -114,7 +109,6 @@ app.post('/api/agent', async (req, res) => {
 })
 
 // Serve static UI
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 app.use(express.static(path.join(__dirname, '../dist/ui')))
 
 app.get('*', (_req, res) => {

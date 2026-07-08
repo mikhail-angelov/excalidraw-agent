@@ -2,7 +2,6 @@
   "name": "excalidraw-agent",
   "version": "1.0.0",
   "description": "AI agent that draws on an Excalidraw canvas",
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "start": "tsx src/server.ts",
@@ -16,6 +15,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "ws": "^8.14.2"
   },

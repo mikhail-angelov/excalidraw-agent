@@ -1,22 +1,29 @@
 version: '3.8'
 
 services:
-  canvas:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: excalidraw-agent:latest
+  excalidraw-agent:
+    image: ghcr.io/mikhail-angelov/excalidraw-agent:latest
     container_name: excalidraw-agent
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - HOST=0.0.0.0
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', () => process.exit(0)).on('error', () => process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+    networks:
+      - proxy-net
+    labels:
+      monic.enabled: "true"
+      monic.check: "http"
+      monic.check_http_url: "https://diagram.bconf.com"
+      monic.name: "diagram.bconf.com"
+      redoproxy.enabled: "true"
+      redoproxy.domain: "diagram.bconf.com"
+      redoproxy.port: 3000
+    env_file:
+      - ./.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    command: "node dist/server.js"
+
+networks:
+  proxy-net:
+    external: true

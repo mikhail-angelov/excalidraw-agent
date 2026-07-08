@@ -4,7 +4,7 @@ import {
   groupElements, ungroupElements, lockElements, unlockElements,
   alignElements, distributeElements, snapshotScene, restoreSnapshot,
   setViewport, DIAGRAM_DESIGN_GUIDE, getResource
-} from './model.js'
+} from './model'
 
 export interface ToolDefinition {
   name: string

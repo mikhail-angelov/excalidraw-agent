@@ -1,4 +1,8 @@
-import { runTool, TOOLS } from './tools.js'
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+import { runTool, TOOLS } from './tools'
 
 const LLM_URL = process.env.LLM_URL || 'https://api.openai.com/v1/chat/completions'
 const LLM_KEY = process.env.LLM_KEY || process.env.OPENAI_API_KEY || ''
