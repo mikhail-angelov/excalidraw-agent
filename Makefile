@@ -1,3 +1,4 @@
+HOST ?= $(shell grep '^HOST=' .env 2>/dev/null | cut -d '=' -f 2)
 IMAGE_NAME = ghcr.io/mikhail-angelov/excalidraw-agent:latest
 
 .PHONY: build dist push deploy logs status
@@ -19,10 +20,10 @@ install:
 	scp ./docker-compose.yml root@$(HOST):/opt/excalidraw-agent/docker-compose.yml
 
 deploy:
-	ssh $(VPS_USER)@$(VPS_HOST) "cd $(VPS_PATH) && docker compose pull && docker compose up -d"
+	ssh root@$(HOST) "cd /opt/excalidraw-agent && docker compose pull && docker compose up -d"
 
 logs:
-	ssh $(VPS_USER)@$(VPS_HOST) "cd $(VPS_PATH) && docker compose logs -f"
+	ssh root@$(HOST) "cd /opt/excalidraw-agent && docker compose logs -f"
 
 status:
-	ssh $(VPS_USER)@$(VPS_HOST) "cd $(VPS_PATH) && docker compose ps"
+	ssh root@$(HOST) "cd /opt/excalidraw-agent && docker compose ps"
