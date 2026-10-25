@@ -112,6 +112,16 @@ const cleanElementForExcalidraw = (
     syncTimestamp,
     ...cleanElement
   } = element;
+  // Excalidraw draws a shape's text only as a bound text element, which it builds from `label`
+  if (cleanElement.type !== "text" && cleanElement.text) {
+    const { text, fontSize, ...shape } = cleanElement;
+    return { ...shape, label: { text, fontSize, strokeColor: shape.strokeColor } } as Partial<ExcalidrawElement>;
+  }
+  // A free text is measured by Excalidraw: a width guessed by the model clips it
+  if (cleanElement.type === "text") {
+    const { width, height, ...text } = cleanElement;
+    return text;
+  }
   return cleanElement;
 };
 
