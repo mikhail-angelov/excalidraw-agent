@@ -497,6 +497,12 @@ function App(): JSX.Element {
               elements: convertedElements,
               captureUpdate: CaptureUpdateAction.NEVER,
             });
+            // The finished diagram arrives at once: show all of it.
+            excalidrawAPI.scrollToContent(convertedElements, {
+              fitToViewport: true,
+              viewportZoomFactor: 0.9,
+              animate: true,
+            });
           }
           break;
 
