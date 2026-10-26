@@ -5,7 +5,8 @@ A minimal AI agent that draws diagrams on an Excalidraw canvas — just an LLM, 
 > Based on [mcp_excalidraw](https://github.com/yctimlin/mcp_excalidraw) by yctimlin.
 > The canvas server, element CRUD, and arrow binding logic are ported from that project — simplified, stripped of MCP/LangChain, and distilled to the core agent loop.
 
-![Agent loop diagram](agent-loop.svg)
+<img height="480" alt="image" src="https://github.com/user-attachments/assets/e390f318-4d7b-4ac7-8b2d-2b5a07ff7343" />
+
 
 ## Quick Start
 
