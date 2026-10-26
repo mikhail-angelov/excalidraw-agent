@@ -97,6 +97,13 @@ export function batchAddElements(sid: string, elements: any[]): any[] {
   return created
 }
 
+// The browser's copy after manual edits: it replaces the scene as is
+export function replaceScene(sid: string, elements: any[]) {
+  const els = getSessionElements(sid)
+  els.clear()
+  for (const el of elements) els.set(el.id, el)
+}
+
 export function clearSession(sid: string): number {
   const els = getSessionElements(sid)
   const count = els.size

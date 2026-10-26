@@ -49,3 +49,16 @@ test('model functions work via agent tools (import bypass test)', async () => {
   expect(initMsg.elements).toEqual([])
   ws.close()
 })
+
+test('manual edits replace the scene', async () => {
+  const put = (body: unknown) => fetch(`${BASE}/api/scene`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json', ...SID }, body: JSON.stringify(body),
+  })
+  const box = { id: 'box', type: 'rectangle', x: 10, y: 20, width: 100, height: 60, text: 'Hello' }
+  expect((await put({ elements: [box] })).status).toBe(200)
+  const scene = await (await fetch(`${BASE}/api/scene`, { headers: SID })).json()
+  expect(scene.elements).toEqual([box])
+
+  expect((await put({ elements: [{ type: 'rectangle' }] })).status).toBe(400)
+  expect((await put({})).status).toBe(400)
+})

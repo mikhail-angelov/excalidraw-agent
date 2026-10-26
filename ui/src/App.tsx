@@ -6,6 +6,7 @@ import {
   ExcalidrawImperativeAPI,
   exportToBlob,
   exportToSvg,
+  getSceneVersion,
 } from "@excalidraw/excalidraw";
 import type {
   ExcalidrawElement,
@@ -125,6 +126,23 @@ const cleanElementForExcalidraw = (
   return cleanElement;
 };
 
+// The inverse of cleanElementForExcalidraw: the server keeps a shape's label as the shape's `text`
+const toServerElements = (elements: readonly any[]): ServerElement[] => {
+  const live = elements.filter((e) => !e.isDeleted);
+  const isLabel = (e: any) => e.type === "text" && e.containerId;
+  const labels = new Map(live.filter(isLabel).map((e) => [e.containerId, e]));
+  return live
+    .filter((e) => !isLabel(e))
+    .map((e) => {
+      const el = { ...e, boundElements: e.boundElements?.filter((b: any) => b.type !== "text") ?? null };
+      const label = labels.get(e.id);
+      if (label) Object.assign(el, { text: label.originalText ?? label.text, fontSize: label.fontSize });
+      if (e.startBinding) el.start = { id: e.startBinding.elementId };
+      if (e.endBinding) el.end = { id: e.endBinding.elementId };
+      return el;
+    });
+};
+
 // Helper function to validate and fix element binding data
 const validateAndFixBindings = (
   elements: Partial<ExcalidrawElement>[],
@@ -181,6 +199,10 @@ function App(): JSX.Element {
   const [excalidrawAPI, setExcalidrawAPI] =
     useState<ExcalidrawAPIRefValue | null>(null);
   const pendingElements = useRef<any[] | null>(null);
+  // The server keeps the scene: manual edits go there, so a reconnect or the agent starts from them
+  const syncedVersion = useRef(0); // the scene version the server already has
+  const syncTimer = useRef<number | undefined>(undefined);
+  const agentBusy = useRef(false); // the agent owns the scene while it draws
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const websocketRef = useRef<WebSocket | null>(null);
   const setApi = (api: any) => {
@@ -194,6 +216,7 @@ function App(): JSX.Element {
       const cleaned = pendingElements.current.map(cleanElementForExcalidraw);
       const converted = convertToExcalidrawElements(cleaned, { regenerateIds: false });
       excalidrawAPI.updateScene({ elements: converted, captureUpdate: CaptureUpdateAction.NEVER });
+      markSynced();
       pendingElements.current = null;
     }
   }, [excalidrawAPI]);
@@ -257,13 +280,9 @@ function App(): JSX.Element {
   // Load existing elements when Excalidraw API becomes available
   useEffect(() => {
     console.log("bootstrap", !!excalidrawAPI, isConnected);
-    if (excalidrawAPI) {
-      loadExistingElements();
-
-      // Ensure WebSocket is connected for real-time updates
-      if (!isConnected) {
-        connectWebSocket();
-      }
+    // The socket's initial_elements brings the scene
+    if (excalidrawAPI && !isConnected) {
+      connectWebSocket();
     }
   }, [excalidrawAPI, isConnected]);
 
@@ -277,6 +296,7 @@ function App(): JSX.Element {
           const cleaned = data.elements.map(cleanElementForExcalidraw)
           const converted = convertToExcalidrawElements(cleaned, { regenerateIds: false })
           excalidrawAPI?.updateScene({ elements: converted, captureUpdate: CaptureUpdateAction.NEVER })
+          markSynced()
         }
       }
     } catch (e) {
@@ -338,6 +358,11 @@ function App(): JSX.Element {
 
       switch (data.type) {
         case "initial_elements":
+          // This tab's drawing is never older than the server's copy (a reconnect, a restarted server): it goes up
+          if (currentElements.some((e: { isDeleted?: boolean }) => !e.isDeleted)) {
+            void syncToBackend(true);
+            break;
+          }
           if (data.elements) {
             if (!excalidrawAPI) {
               // Cache elements for when Excalidraw API becomes available
@@ -354,6 +379,7 @@ function App(): JSX.Element {
                 elements: convertedElements,
                 captureUpdate: CaptureUpdateAction.NEVER,
               });
+              markSynced();
             }
           }
           break;
@@ -482,6 +508,7 @@ function App(): JSX.Element {
             elements: [],
             captureUpdate: CaptureUpdateAction.NEVER,
           });
+          markSynced();
           break;
 
         case "scene_updated":
@@ -497,6 +524,7 @@ function App(): JSX.Element {
               elements: convertedElements,
               captureUpdate: CaptureUpdateAction.NEVER,
             });
+            markSynced();
             // The finished diagram arrives at once: show all of it.
             excalidrawAPI.scrollToContent(convertedElements, {
               fitToViewport: true,
@@ -824,9 +852,30 @@ function App(): JSX.Element {
     });
   };
 
-  // Main sync function
-  const syncToBackend = async (): Promise<void> => {
-    // No-op — server manages state directly; elements arrive via WS
+  const markSynced = (): void => {
+    if (excalidrawAPI) syncedVersion.current = getSceneVersion(excalidrawAPI.getSceneElementsIncludingDeleted());
+  };
+
+  // Send the scene to the server; `force` sends it even when the server should already have it
+  const syncToBackend = async (force = false): Promise<void> => {
+    window.clearTimeout(syncTimer.current);
+    if (!excalidrawAPI || agentBusy.current) return;
+    const elements = excalidrawAPI.getSceneElementsIncludingDeleted();
+    const version = getSceneVersion(elements);
+    if (!force && version === syncedVersion.current) return;
+    const response = await fetch("/api/scene", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ elements: toServerElements(elements) }),
+    }).catch(() => null);
+    if (response?.ok) syncedVersion.current = version;
+  };
+
+  // Excalidraw reports every pointer move; a changed scene goes up once the user pauses
+  const handleSceneChange = (elements: readonly any[]): void => {
+    if (agentBusy.current || getSceneVersion(elements) === syncedVersion.current) return;
+    window.clearTimeout(syncTimer.current);
+    syncTimer.current = window.setTimeout(() => void syncToBackend(), 500);
   };
 
   const clearCanvas = async (): Promise<void> => {
@@ -836,6 +885,7 @@ function App(): JSX.Element {
         elements: [],
         captureUpdate: CaptureUpdateAction.IMMEDIATELY,
       });
+      markSynced();
     } catch (error) {
       console.error("Error clearing canvas:", error);
     }
@@ -865,6 +915,9 @@ function App(): JSX.Element {
     streamingMessageIdRef.current = null;
     setCurrentStreamingMessageId(null);
 
+    // The agent draws on the server's copy: it gets the latest edits first
+    await syncToBackend();
+    agentBusy.current = true;
     try {
       const response = await fetch("/api/agent", {
         method: "POST",
@@ -876,7 +929,8 @@ function App(): JSX.Element {
         }),
       });
 
-      const result = await response.json();
+      // A proxy in front answers errors as plain text, not JSON
+      const result = await response.json().catch(() => ({ error: `HTTP ${response.status} ${response.statusText}` }));
 
       if (!response.ok) {
         throw new Error(result.error || `HTTP ${response.status}`);
@@ -923,6 +977,8 @@ function App(): JSX.Element {
       };
 
       setAiMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      agentBusy.current = false;
     }
   };
 
@@ -988,6 +1044,7 @@ function App(): JSX.Element {
         <div className="canvas-container">
           <Excalidraw
             excalidrawAPI={(api: ExcalidrawAPIRefValue) => setApi(api)}
+            onChange={handleSceneChange}
             initialData={{
               elements: [],
               appState: {

@@ -15,6 +15,8 @@ services:
       redoproxy.enabled: "true"
       redoproxy.domain: "diagram.bconf.com"
       redoproxy.port: 3000
+      # an agent run takes up to 15 model requests of up to 60 s each
+      redoproxy.timeout: 900
     env_file:
       - ./.env
     logging:
